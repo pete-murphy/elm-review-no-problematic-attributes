@@ -1,10 +1,10 @@
 # elm-review-no-problematic-attributes
 
-Provides [`elm-review`](https://package.elm-lang.org/packages/jfmengels/elm-review/latest/) rules to REPLACEME.
+Provides [`elm-review`](https://package.elm-lang.org/packages/jfmengels/elm-review/latest/) rules to ban problematic HTML and SVG attributes.
 
 ## Provided rules
 
-- [`NoProblematicAttributes`](https://package.elm-lang.org/packages/pete-murphy/elm-review-no-problematic-attributes/1.0.0/NoProblematicAttributes) - Reports REPLACEME.
+- [`NoProblematicAttributes`](https://package.elm-lang.org/packages/pete-murphy/elm-review-no-problematic-attributes/1.0.0/NoProblematicAttributes) - Reports uses of HTML/SVG attributes that cause runtime errors, rendering bugs, or accessibility problems.
 
 ## Configuration
 

@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gh search:*)",
+      "Bash(jq -r \".[] | select\\(.title | test\\(\"\"attribute|runtime|error|crash|problematic\"\"; \"\"i\"\"\\)\\) | \"\"\\\\\\(.number\\) - \\\\\\(.title\\)\\\\n  \\\\\\(.url\\)\"\"\")",
+      "Bash(find /Users/peter.murphy/Code/elm/elm-review-no-problematic-attributes/elm-stuff -name Expression.elm -path */Elm/Syntax/*)",
+      "Bash(npx elm-test:*)",
+      "Bash(npx elm-review:*)"
+    ]
+  }
+}
