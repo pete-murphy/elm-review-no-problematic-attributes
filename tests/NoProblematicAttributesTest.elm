@@ -1,10 +1,16 @@
 module NoProblematicAttributesTest exposing (all)
 
-import NoProblematicAttributes exposing (rule)
+import NoProblematicAttributes
 import Review.Project as Project exposing (Project)
+import Review.Rule exposing (Rule)
 import Review.Test
 import Review.Test.Dependencies
 import Test exposing (Test, describe, test)
+
+
+rule : Rule
+rule =
+    NoProblematicAttributes.rule NoProblematicAttributes.defaults
 
 
 projectWithHtmlDependency : Project
@@ -20,6 +26,7 @@ all =
         , svgStyleTests
         , titleTests
         , htmlClassOnSvgTests
+        , customOptionTests
         ]
 
 
@@ -161,7 +168,7 @@ a = Svg.Attributes.xlinkType ""
                             , under = "Svg.Attributes.xlinkType"
                             }
                         ]
-        , test "should report aliased Svg.Attributes xlink functions and fix them" <|
+        , test "should report aliased Svg.Attributes xlinkHref and fix it" <|
             \() ->
                 """module A exposing (..)
 import Svg.Attributes as SA
@@ -170,7 +177,7 @@ a = SA.xlinkHref "#icon"
                     |> Review.Test.run rule
                     |> Review.Test.expectErrors
                         [ Review.Test.error
-                            { message = "Don't use `SA.xlinkHref`"
+                            { message = "Don't use `Svg.Attributes.xlinkHref`"
                             , details =
                                 [ "`xlink:href` is deprecated in SVG 2.0 and causes rendering problems with Elm's virtual DOM."
                                 , "Use `Html.Attributes.attribute \"href\" \"...\"` instead. Note: don't use `Html.Attributes.href` since that sets the `.href` property, which is readonly in SVG."
@@ -272,7 +279,7 @@ a = SA.style "color" "red"
                     |> Review.Test.run rule
                     |> Review.Test.expectErrors
                         [ Review.Test.error
-                            { message = "Don't use `SA.style`"
+                            { message = "Don't use `Svg.Attributes.style`"
                             , details =
                                 [ "Inline style attributes are incompatible with Content Security Policy without `style-src 'unsafe-inline'`."
                                 , "Use class-based styling instead."
@@ -341,7 +348,7 @@ a = HA.title "tooltip"
                     |> Review.Test.run rule
                     |> Review.Test.expectErrors
                         [ Review.Test.error
-                            { message = "Don't use the `HA.title` attribute"
+                            { message = "Don't use the `Html.Attributes.title` attribute"
                             , details =
                                 [ "The `title` attribute is discouraged because many user agents do not expose it accessibly. It typically requires a pointing device (mouse) to trigger a tooltip, excluding keyboard-only and touch-only users."
                                 , "See https://html.spec.whatwg.org/multipage/dom.html#the-title-attribute for more information."
@@ -492,5 +499,83 @@ import Svg
 a attrs = Svg.svg attrs []
 """
                     |> Review.Test.run rule
+                    |> Review.Test.expectNoErrors
+        ]
+
+
+
+-- Custom options
+
+
+customOptionTests : Test
+customOptionTests =
+    describe "custom options"
+        [ test "should report a custom forbidden function" <|
+            \() ->
+                """module A exposing (..)
+import Html.Attributes
+a = Html.Attributes.contenteditable True
+"""
+                    |> Review.Test.run
+                        (NoProblematicAttributes.rule
+                            [ NoProblematicAttributes.forbid
+                                { moduleName = [ "Html", "Attributes" ]
+                                , functionName = "contenteditable"
+                                , message = "Don't use contenteditable"
+                                , details = [ "It causes issues." ]
+                                }
+                            ]
+                        )
+                    |> Review.Test.expectErrors
+                        [ Review.Test.error
+                            { message = "Don't use contenteditable"
+                            , details = [ "It causes issues." ]
+                            , under = "Html.Attributes.contenteditable"
+                            }
+                        ]
+        , test "should report a custom forbidden function with fix" <|
+            \() ->
+                """module A exposing (..)
+import Html.Attributes
+a = Html.Attributes.contenteditable True
+"""
+                    |> Review.Test.run
+                        (NoProblematicAttributes.rule
+                            [ NoProblematicAttributes.forbidWithFix
+                                { moduleName = [ "Html", "Attributes" ]
+                                , functionName = "contenteditable"
+                                , message = "Don't use contenteditable"
+                                , details = [ "Use our custom version." ]
+                                , replaceWith = "CustomAttributes.contenteditable"
+                                }
+                            ]
+                        )
+                    |> Review.Test.expectErrors
+                        [ Review.Test.error
+                            { message = "Don't use contenteditable"
+                            , details = [ "Use our custom version." ]
+                            , under = "Html.Attributes.contenteditable"
+                            }
+                            |> Review.Test.whenFixed """module A exposing (..)
+import Html.Attributes
+a = CustomAttributes.contenteditable True
+"""
+                        ]
+        , test "should not report defaults when using custom-only options" <|
+            \() ->
+                """module A exposing (..)
+import Svg.Attributes
+a = Svg.Attributes.xlinkHref "#icon"
+"""
+                    |> Review.Test.run
+                        (NoProblematicAttributes.rule
+                            [ NoProblematicAttributes.forbid
+                                { moduleName = [ "Html", "Attributes" ]
+                                , functionName = "contenteditable"
+                                , message = "Don't use contenteditable"
+                                , details = [ "It causes issues." ]
+                                }
+                            ]
+                        )
                     |> Review.Test.expectNoErrors
         ]
