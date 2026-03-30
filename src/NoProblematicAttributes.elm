@@ -1,12 +1,16 @@
 module NoProblematicAttributes exposing
     ( rule
-    , Option, defaults, forbid, forbidWithFix, htmlClassOnSvg, noAriaLabelOnNamingProhibited
+    , Configuration, defaults, init
+    , forbid, forbidWithFix
+    , htmlClassOnSvg, noAriaLabelOnNamingProhibited
     )
 
 {-|
 
 @docs rule
-@docs Option, defaults, forbid, forbidWithFix, htmlClassOnSvg, noAriaLabelOnNamingProhibited
+@docs Configuration, defaults, init
+@docs forbid, forbidWithFix
+@docs htmlClassOnSvg, noAriaLabelOnNamingProhibited
 
 -}
 
@@ -20,14 +24,21 @@ import Review.ModuleNameLookupTable as ModuleNameLookupTable exposing (ModuleNam
 import Review.Rule as Rule exposing (Rule)
 
 
-{-| An option that bans a specific attribute or function. Use [`forbid`](#forbid)
-or [`forbidWithFix`](#forbidWithFix) to create custom options, or use the
-built-in [`defaults`](#defaults).
+{-| Configuration for the rule. Use [`defaults`](#defaults) for the built-in
+checks, or [`init`](#init) to start from scratch.
+
+    config =
+        [ NoProblematicAttributes.defaults
+            |> NoProblematicAttributes.rule
+        ]
+
 -}
-type Option
-    = BannedFunction BannedFunctionConfig
-    | HtmlClassOnSvg
-    | NoAriaLabelOnNamingProhibited
+type Configuration
+    = Configuration
+        { bannedFunctions : List BannedFunctionConfig
+        , checkHtmlClassOnSvg : Bool
+        , checkNoAriaLabelOnNamingProhibited : Bool
+        }
 
 
 type alias BannedFunctionConfig =
@@ -39,7 +50,7 @@ type alias BannedFunctionConfig =
     }
 
 
-{-| The default set of options that ban known-problematic attributes:
+{-| The default configuration that bans known-problematic attributes:
 
   - `Svg.Attributes.xlinkHref` (and all `xlink*` functions) — deprecated, causes rendering problems
   - `Svg.Attributes.style` — incompatible with Content Security Policy
@@ -50,111 +61,143 @@ type alias BannedFunctionConfig =
 Each is also checked for the `*.Styled.*` (elm-css) variant.
 
     config =
-        [ NoProblematicAttributes.rule NoProblematicAttributes.defaults
+        [ NoProblematicAttributes.defaults
+            |> NoProblematicAttributes.rule
         ]
 
 -}
-defaults : List Option
+defaults : Configuration
 defaults =
-    [ forbidWithFix
-        { moduleName = [ "Svg", "Attributes" ]
-        , functionName = "xlinkHref"
-        , message = "Don't use `Svg.Attributes.xlinkHref`"
-        , details =
+    Configuration
+        { bannedFunctions = defaultBannedFunctions
+        , checkHtmlClassOnSvg = True
+        , checkNoAriaLabelOnNamingProhibited = True
+        }
+
+
+{-| A minimal configuration with no checks enabled. Use this as a starting
+point when you want to enable only specific checks.
+
+    config =
+        [ NoProblematicAttributes.init
+            |> NoProblematicAttributes.forbid
+                { moduleName = [ "Html", "Attributes" ]
+                , functionName = "contenteditable"
+                , message = "Don't use contenteditable"
+                , details = [ "It causes issues in our app." ]
+                }
+            |> NoProblematicAttributes.rule
+        ]
+
+-}
+init : Configuration
+init =
+    Configuration
+        { bannedFunctions = []
+        , checkHtmlClassOnSvg = False
+        , checkNoAriaLabelOnNamingProhibited = False
+        }
+
+
+defaultBannedFunctions : List BannedFunctionConfig
+defaultBannedFunctions =
+    [ { moduleName = [ "Svg", "Attributes" ]
+      , functionName = "xlinkHref"
+      , message = "Don't use `Svg.Attributes.xlinkHref`"
+      , details =
             [ "`xlink:href` is deprecated in SVG 2.0 and causes rendering problems with Elm's virtual DOM."
             , "Use `Html.Attributes.attribute \"href\" \"...\"` instead. Note: don't use `Html.Attributes.href` since that sets the `.href` property, which is readonly in SVG."
             ]
-        , replaceWith = "Html.Attributes.attribute \"href\""
-        }
-    , forbidWithFix
-        { moduleName = [ "Svg", "Styled", "Attributes" ]
-        , functionName = "xlinkHref"
-        , message = "Don't use `Svg.Styled.Attributes.xlinkHref`"
-        , details =
+      , replaceWith = Just "Html.Attributes.attribute \"href\""
+      }
+    , { moduleName = [ "Svg", "Styled", "Attributes" ]
+      , functionName = "xlinkHref"
+      , message = "Don't use `Svg.Styled.Attributes.xlinkHref`"
+      , details =
             [ "`xlink:href` is deprecated in SVG 2.0 and causes rendering problems with Elm's virtual DOM."
             , "Use `Html.Attributes.attribute \"href\" \"...\"` instead. Note: don't use `Html.Attributes.href` since that sets the `.href` property, which is readonly in SVG."
             ]
-        , replaceWith = "Html.Attributes.attribute \"href\""
-        }
-    , xlinkOption "xlinkActuate" [ "Svg", "Attributes" ]
-    , xlinkOption "xlinkActuate" [ "Svg", "Styled", "Attributes" ]
-    , xlinkOption "xlinkArcrole" [ "Svg", "Attributes" ]
-    , xlinkOption "xlinkArcrole" [ "Svg", "Styled", "Attributes" ]
-    , xlinkOption "xlinkRole" [ "Svg", "Attributes" ]
-    , xlinkOption "xlinkRole" [ "Svg", "Styled", "Attributes" ]
-    , xlinkOption "xlinkShow" [ "Svg", "Attributes" ]
-    , xlinkOption "xlinkShow" [ "Svg", "Styled", "Attributes" ]
-    , xlinkOption "xlinkTitle" [ "Svg", "Attributes" ]
-    , xlinkOption "xlinkTitle" [ "Svg", "Styled", "Attributes" ]
-    , xlinkOption "xlinkType" [ "Svg", "Attributes" ]
-    , xlinkOption "xlinkType" [ "Svg", "Styled", "Attributes" ]
-    , forbid
-        { moduleName = [ "Svg", "Attributes" ]
-        , functionName = "style"
-        , message = "Don't use `Svg.Attributes.style`"
-        , details =
+      , replaceWith = Just "Html.Attributes.attribute \"href\""
+      }
+    , xlinkBan "xlinkActuate" [ "Svg", "Attributes" ]
+    , xlinkBan "xlinkActuate" [ "Svg", "Styled", "Attributes" ]
+    , xlinkBan "xlinkArcrole" [ "Svg", "Attributes" ]
+    , xlinkBan "xlinkArcrole" [ "Svg", "Styled", "Attributes" ]
+    , xlinkBan "xlinkRole" [ "Svg", "Attributes" ]
+    , xlinkBan "xlinkRole" [ "Svg", "Styled", "Attributes" ]
+    , xlinkBan "xlinkShow" [ "Svg", "Attributes" ]
+    , xlinkBan "xlinkShow" [ "Svg", "Styled", "Attributes" ]
+    , xlinkBan "xlinkTitle" [ "Svg", "Attributes" ]
+    , xlinkBan "xlinkTitle" [ "Svg", "Styled", "Attributes" ]
+    , xlinkBan "xlinkType" [ "Svg", "Attributes" ]
+    , xlinkBan "xlinkType" [ "Svg", "Styled", "Attributes" ]
+    , { moduleName = [ "Svg", "Attributes" ]
+      , functionName = "style"
+      , message = "Don't use `Svg.Attributes.style`"
+      , details =
             [ "Inline style attributes are incompatible with Content Security Policy without `style-src 'unsafe-inline'`."
             , "Use class-based styling instead."
             ]
-        }
-    , forbid
-        { moduleName = [ "Svg", "Styled", "Attributes" ]
-        , functionName = "style"
-        , message = "Don't use `Svg.Styled.Attributes.style`"
-        , details =
+      , replaceWith = Nothing
+      }
+    , { moduleName = [ "Svg", "Styled", "Attributes" ]
+      , functionName = "style"
+      , message = "Don't use `Svg.Styled.Attributes.style`"
+      , details =
             [ "Inline style attributes are incompatible with Content Security Policy without `style-src 'unsafe-inline'`."
             , "Use class-based styling instead."
             ]
-        }
-    , forbid
-        { moduleName = [ "Html", "Attributes" ]
-        , functionName = "title"
-        , message = "Don't use the `Html.Attributes.title` attribute"
-        , details =
+      , replaceWith = Nothing
+      }
+    , { moduleName = [ "Html", "Attributes" ]
+      , functionName = "title"
+      , message = "Don't use the `Html.Attributes.title` attribute"
+      , details =
             [ "The `title` attribute is discouraged because many user agents do not expose it accessibly. It typically requires a pointing device (mouse) to trigger a tooltip, excluding keyboard-only and touch-only users."
             , "See https://html.spec.whatwg.org/multipage/dom.html#the-title-attribute for more information."
             ]
-        }
-    , forbid
-        { moduleName = [ "Html", "Styled", "Attributes" ]
-        , functionName = "title"
-        , message = "Don't use the `Html.Styled.Attributes.title` attribute"
-        , details =
+      , replaceWith = Nothing
+      }
+    , { moduleName = [ "Html", "Styled", "Attributes" ]
+      , functionName = "title"
+      , message = "Don't use the `Html.Styled.Attributes.title` attribute"
+      , details =
             [ "The `title` attribute is discouraged because many user agents do not expose it accessibly. It typically requires a pointing device (mouse) to trigger a tooltip, excluding keyboard-only and touch-only users."
             , "See https://html.spec.whatwg.org/multipage/dom.html#the-title-attribute for more information."
             ]
-        }
-    , htmlClassOnSvg
-    , noAriaLabelOnNamingProhibited
+      , replaceWith = Nothing
+      }
     ]
 
 
-xlinkOption : String -> List String -> Option
-xlinkOption functionName moduleName =
+xlinkBan : String -> List String -> BannedFunctionConfig
+xlinkBan functionName moduleName =
     let
         qualName : String
         qualName =
             String.join "." moduleName ++ "." ++ functionName
     in
-    forbid
-        { moduleName = moduleName
-        , functionName = functionName
-        , message = "Don't use `" ++ qualName ++ "`"
-        , details =
-            [ "All `xlink:*` attributes are deprecated in SVG 2.0 and cause rendering problems with Elm's virtual DOM."
-            , "See https://developer.mozilla.org/en-US/docs/Web/SVG/Attribute/xlink:href for more information."
-            ]
-        }
+    { moduleName = moduleName
+    , functionName = functionName
+    , message = "Don't use `" ++ qualName ++ "`"
+    , details =
+        [ "All `xlink:*` attributes are deprecated in SVG 2.0 and cause rendering problems with Elm's virtual DOM."
+        , "See https://developer.mozilla.org/en-US/docs/Web/SVG/Attribute/xlink:href for more information."
+        ]
+    , replaceWith = Nothing
+    }
 
 
 {-| Ban a function. The error has no automatic fix.
 
-    NoProblematicAttributes.forbid
-        { moduleName = [ "Html", "Attributes" ]
-        , functionName = "contenteditable"
-        , message = "Don't use contenteditable"
-        , details = [ "It causes issues in our app." ]
-        }
+    NoProblematicAttributes.defaults
+        |> NoProblematicAttributes.forbid
+            { moduleName = [ "Html", "Attributes" ]
+            , functionName = "contenteditable"
+            , message = "Don't use contenteditable"
+            , details = [ "It causes issues in our app." ]
+            }
+        |> NoProblematicAttributes.rule
 
 -}
 forbid :
@@ -163,14 +206,19 @@ forbid :
     , message : String
     , details : List String
     }
-    -> Option
-forbid config =
-    BannedFunction
-        { moduleName = config.moduleName
-        , functionName = config.functionName
-        , message = config.message
-        , details = config.details
-        , replaceWith = Nothing
+    -> Configuration
+    -> Configuration
+forbid config (Configuration inner) =
+    Configuration
+        { inner
+            | bannedFunctions =
+                { moduleName = config.moduleName
+                , functionName = config.functionName
+                , message = config.message
+                , details = config.details
+                , replaceWith = Nothing
+                }
+                    :: inner.bannedFunctions
         }
 
 
@@ -179,13 +227,15 @@ forbid config =
 The `replaceWith` string replaces the function reference in source code.
 Arguments are preserved thanks to currying.
 
-    NoProblematicAttributes.forbidWithFix
-        { moduleName = [ "Svg", "Attributes" ]
-        , functionName = "xlinkHref"
-        , message = "Don't use `Svg.Attributes.xlinkHref`"
-        , details = [ "..." ]
-        , replaceWith = "Html.Attributes.attribute \"href\""
-        }
+    NoProblematicAttributes.defaults
+        |> NoProblematicAttributes.forbidWithFix
+            { moduleName = [ "Svg", "Attributes" ]
+            , functionName = "xlinkHref"
+            , message = "Don't use `Svg.Attributes.xlinkHref`"
+            , details = [ "..." ]
+            , replaceWith = "Html.Attributes.attribute \"href\""
+            }
+        |> NoProblematicAttributes.rule
 
 This would fix `Svg.Attributes.xlinkHref "#icon"` to
 `Html.Attributes.attribute "href" "#icon"`.
@@ -198,14 +248,19 @@ forbidWithFix :
     , details : List String
     , replaceWith : String
     }
-    -> Option
-forbidWithFix config =
-    BannedFunction
-        { moduleName = config.moduleName
-        , functionName = config.functionName
-        , message = config.message
-        , details = config.details
-        , replaceWith = Just config.replaceWith
+    -> Configuration
+    -> Configuration
+forbidWithFix config (Configuration inner) =
+    Configuration
+        { inner
+            | bannedFunctions =
+                { moduleName = config.moduleName
+                , functionName = config.functionName
+                , message = config.message
+                , details = config.details
+                , replaceWith = Just config.replaceWith
+                }
+                    :: inner.bannedFunctions
         }
 
 
@@ -217,10 +272,14 @@ The fix replaces it with `Svg.Attributes.class`.
 
 This is included in [`defaults`](#defaults).
 
+    NoProblematicAttributes.init
+        |> NoProblematicAttributes.htmlClassOnSvg
+        |> NoProblematicAttributes.rule
+
 -}
-htmlClassOnSvg : Option
-htmlClassOnSvg =
-    HtmlClassOnSvg
+htmlClassOnSvg : Configuration -> Configuration
+htmlClassOnSvg (Configuration inner) =
+    Configuration { inner | checkHtmlClassOnSvg = True }
 
 
 {-| Ban `aria-label` and `aria-labelledby` on elements whose ARIA role
@@ -232,31 +291,34 @@ labeling.
 
 This is included in [`defaults`](#defaults).
 
+    NoProblematicAttributes.init
+        |> NoProblematicAttributes.noAriaLabelOnNamingProhibited
+        |> NoProblematicAttributes.rule
+
 -}
-noAriaLabelOnNamingProhibited : Option
-noAriaLabelOnNamingProhibited =
-    NoAriaLabelOnNamingProhibited
+noAriaLabelOnNamingProhibited : Configuration -> Configuration
+noAriaLabelOnNamingProhibited (Configuration inner) =
+    Configuration { inner | checkNoAriaLabelOnNamingProhibited = True }
 
 
 {-| Reports uses of problematic HTML and SVG attributes.
 
     config =
-        [ NoProblematicAttributes.rule NoProblematicAttributes.defaults
+        [ NoProblematicAttributes.defaults
+            |> NoProblematicAttributes.rule
         ]
 
-Use [`defaults`](#defaults) for the built-in checks, or build your own list:
+Use [`defaults`](#defaults) for the built-in checks, or build your own:
 
     config =
-        [ NoProblematicAttributes.rule
-            (NoProblematicAttributes.defaults
-                ++ [ NoProblematicAttributes.forbid
-                        { moduleName = [ "Html", "Attributes" ]
-                        , functionName = "contenteditable"
-                        , message = "Don't use contenteditable"
-                        , details = [ "It causes issues in our app." ]
-                        }
-                   ]
-            )
+        [ NoProblematicAttributes.defaults
+            |> NoProblematicAttributes.forbid
+                { moduleName = [ "Html", "Attributes" ]
+                , functionName = "contenteditable"
+                , message = "Don't use contenteditable"
+                , details = [ "It causes issues in our app." ]
+                }
+            |> NoProblematicAttributes.rule
         ]
 
 
@@ -328,54 +390,16 @@ elm-review --template pete-murphy/elm-review-no-problematic-attributes/example -
 ```
 
 -}
-rule : List Option -> Rule
-rule options =
-    let
-        bannedFunctions : List BannedFunctionConfig
-        bannedFunctions =
-            List.filterMap getBannedFunction options
-
-        hasHtmlClassOnSvg : Bool
-        hasHtmlClassOnSvg =
-            List.any isHtmlClassOnSvgOption options
-
-        hasNoAriaLabel : Bool
-        hasNoAriaLabel =
-            List.any isNoAriaLabelOption options
-    in
+rule : Configuration -> Rule
+rule (Configuration config) =
     Rule.newModuleRuleSchemaUsingContextCreator "NoProblematicAttributes" initialContext
-        |> Rule.withExpressionEnterVisitor (expressionVisitor bannedFunctions hasHtmlClassOnSvg hasNoAriaLabel)
+        |> Rule.withExpressionEnterVisitor
+            (expressionVisitor config.bannedFunctions config.checkHtmlClassOnSvg config.checkNoAriaLabelOnNamingProhibited)
         |> Rule.fromModuleRuleSchema
 
 
-getBannedFunction : Option -> Maybe BannedFunctionConfig
-getBannedFunction option =
-    case option of
-        BannedFunction config ->
-            Just config
 
-        _ ->
-            Nothing
-
-
-isHtmlClassOnSvgOption : Option -> Bool
-isHtmlClassOnSvgOption option =
-    case option of
-        HtmlClassOnSvg ->
-            True
-
-        _ ->
-            False
-
-
-isNoAriaLabelOption : Option -> Bool
-isNoAriaLabelOption option =
-    case option of
-        NoAriaLabelOnNamingProhibited ->
-            True
-
-        _ ->
-            False
+-- CONTEXT
 
 
 type alias Context =
@@ -393,8 +417,12 @@ initialContext =
         |> Rule.withModuleNameLookupTable
 
 
+
+-- EXPRESSION VISITOR
+
+
 expressionVisitor : List BannedFunctionConfig -> Bool -> Bool -> Node Expression -> Context -> ( List (Rule.Error {}), Context )
-expressionVisitor bannedFunctions hasHtmlClassOnSvgEnabled hasNoAriaLabelEnabled node context =
+expressionVisitor bannedFunctions checkHtmlClassOnSvgEnabled checkNoAriaLabelEnabled node context =
     case Node.value node of
         Expression.FunctionOrValue _ name ->
             ( checkBannedFunctions bannedFunctions name node context
@@ -407,7 +435,7 @@ expressionVisitor bannedFunctions hasHtmlClassOnSvgEnabled hasNoAriaLabelEnabled
                     let
                         svgErrors : List (Rule.Error {})
                         svgErrors =
-                            if hasHtmlClassOnSvgEnabled then
+                            if checkHtmlClassOnSvgEnabled then
                                 checkSvgApplication fnNode attrListNode context
 
                             else
@@ -415,7 +443,7 @@ expressionVisitor bannedFunctions hasHtmlClassOnSvgEnabled hasNoAriaLabelEnabled
 
                         ariaLabelErrors : List (Rule.Error {})
                         ariaLabelErrors =
-                            if hasNoAriaLabelEnabled then
+                            if checkNoAriaLabelEnabled then
                                 checkAriaLabelOnNamingProhibited fnNode fnName attrListNode context
 
                             else
@@ -430,14 +458,13 @@ expressionVisitor bannedFunctions hasHtmlClassOnSvgEnabled hasNoAriaLabelEnabled
             ( [], context )
 
 
+
+-- BANNED FUNCTIONS
+
+
 checkBannedFunctions : List BannedFunctionConfig -> String -> Node Expression -> Context -> List (Rule.Error {})
 checkBannedFunctions bannedFunctions name node context =
-    let
-        resolvedModule : Maybe (List String)
-        resolvedModule =
-            ModuleNameLookupTable.moduleNameFor context.moduleNameLookupTable node
-    in
-    case resolvedModule of
+    case ModuleNameLookupTable.moduleNameFor context.moduleNameLookupTable node of
         Just moduleName ->
             case findBannedFunction moduleName name bannedFunctions of
                 Just config ->
@@ -484,17 +511,12 @@ bannedFunctionError config node =
 
 
 
--- Html.Attributes.class on SVG elements
+-- Html.Attributes.class ON SVG ELEMENTS
 
 
 checkSvgApplication : Node Expression -> Node Expression -> Context -> List (Rule.Error {})
 checkSvgApplication fnNode attrListNode context =
-    let
-        resolvedFnModule : Maybe (List String)
-        resolvedFnModule =
-            ModuleNameLookupTable.moduleNameFor context.moduleNameLookupTable fnNode
-    in
-    if isSvgElementModule resolvedFnModule then
+    if isSvgElementModule (ModuleNameLookupTable.moduleNameFor context.moduleNameLookupTable fnNode) then
         checkAttrListForHtmlClass attrListNode context
 
     else
@@ -518,12 +540,7 @@ checkSingleAttrForHtmlClass : Context -> Node Expression -> Maybe (Rule.Error {}
 checkSingleAttrForHtmlClass context node =
     case Node.value node of
         Expression.FunctionOrValue moduleName "class" ->
-            let
-                resolved : Maybe (List String)
-                resolved =
-                    ModuleNameLookupTable.moduleNameFor context.moduleNameLookupTable node
-            in
-            if isHtmlAttributeModule resolved then
+            if isHtmlAttributeModule (ModuleNameLookupTable.moduleNameFor context.moduleNameLookupTable node) then
                 Just (htmlClassOnSvgError moduleName node)
 
             else
@@ -532,12 +549,7 @@ checkSingleAttrForHtmlClass context node =
         Expression.Application (innerNode :: _) ->
             case Node.value innerNode of
                 Expression.FunctionOrValue moduleName "class" ->
-                    let
-                        resolved : Maybe (List String)
-                        resolved =
-                            ModuleNameLookupTable.moduleNameFor context.moduleNameLookupTable innerNode
-                    in
-                    if isHtmlAttributeModule resolved then
+                    if isHtmlAttributeModule (ModuleNameLookupTable.moduleNameFor context.moduleNameLookupTable innerNode) then
                         Just (htmlClassOnSvgError moduleName innerNode)
 
                     else
@@ -569,17 +581,12 @@ htmlClassOnSvgError moduleName node =
 
 
 
--- aria-label on naming-prohibited elements
+-- aria-label ON NAMING-PROHIBITED ELEMENTS
 
 
 checkAriaLabelOnNamingProhibited : Node Expression -> String -> Node Expression -> Context -> List (Rule.Error {})
 checkAriaLabelOnNamingProhibited fnNode fnName attrListNode context =
-    let
-        resolvedFnModule : Maybe (List String)
-        resolvedFnModule =
-            ModuleNameLookupTable.moduleNameFor context.moduleNameLookupTable fnNode
-    in
-    if isHtmlElementModule resolvedFnModule then
+    if isHtmlElementModule (ModuleNameLookupTable.moduleNameFor context.moduleNameLookupTable fnNode) then
         case Node.value attrListNode of
             Expression.ListExpr items ->
                 let
@@ -643,17 +650,10 @@ extractAttrInfo context items =
 extractSingleAttr : Context -> Node Expression -> AttrInfo -> AttrInfo
 extractSingleAttr context node info =
     case Node.value node of
-        -- Html.Attributes.attribute "aria-label" "value"
-        -- Html.Attributes.attribute "role" "button"
         Expression.Application (fnNode :: firstArg :: restArgs) ->
             case Node.value fnNode of
                 Expression.FunctionOrValue _ "attribute" ->
-                    let
-                        resolved : Maybe (List String)
-                        resolved =
-                            ModuleNameLookupTable.moduleNameFor context.moduleNameLookupTable fnNode
-                    in
-                    if isHtmlAttributeModule resolved then
+                    if isHtmlAttributeModule (ModuleNameLookupTable.moduleNameFor context.moduleNameLookupTable fnNode) then
                         case Node.value firstArg of
                             Expression.Literal attrName ->
                                 if attrName == "aria-label" || attrName == "aria-labelledby" then
@@ -683,7 +683,6 @@ extractSingleAttr context node info =
                                                     { info | knownAttributes = Dict.insert attrName value info.knownAttributes }
 
                                                 _ ->
-                                                    -- Attribute present but value not a literal — record presence
                                                     { info | knownAttributes = Dict.insert attrName "" info.knownAttributes }
 
                                         _ ->
@@ -695,14 +694,8 @@ extractSingleAttr context node info =
                     else
                         info
 
-                -- Html.Attributes.href "/path"
                 Expression.FunctionOrValue _ attrFnName ->
-                    let
-                        resolved : Maybe (List String)
-                        resolved =
-                            ModuleNameLookupTable.moduleNameFor context.moduleNameLookupTable fnNode
-                    in
-                    if isHtmlAttributeModule resolved then
+                    if isHtmlAttributeModule (ModuleNameLookupTable.moduleNameFor context.moduleNameLookupTable fnNode) then
                         case restArgs of
                             valueNode :: _ ->
                                 case Node.value valueNode of
@@ -721,14 +714,8 @@ extractSingleAttr context node info =
                 _ ->
                     info
 
-        -- Partial application: Html.Attributes.href (no argument yet — still records presence)
         Expression.FunctionOrValue _ attrFnName ->
-            let
-                resolved : Maybe (List String)
-                resolved =
-                    ModuleNameLookupTable.moduleNameFor context.moduleNameLookupTable node
-            in
-            if isHtmlAttributeModule resolved && attrFnName /= "attribute" then
+            if isHtmlAttributeModule (ModuleNameLookupTable.moduleNameFor context.moduleNameLookupTable node) && attrFnName /= "attribute" then
                 { info | knownAttributes = Dict.insert attrFnName "" info.knownAttributes }
 
             else
@@ -767,6 +754,10 @@ ariaLabelError tagName role isExplicit ariaAttrName ariaAttrNameNode =
         (Node.range ariaAttrNameNode)
 
 
+
+-- HELPERS
+
+
 isHtmlElementModule : Maybe (List String) -> Bool
 isHtmlElementModule resolvedModule =
     case resolvedModule of
@@ -790,10 +781,6 @@ isHtmlElementModule resolvedModule =
 
         _ ->
             False
-
-
-
--- HELPERS
 
 
 isHtmlAttributeModule : Maybe (List String) -> Bool

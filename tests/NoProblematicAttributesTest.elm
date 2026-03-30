@@ -518,14 +518,14 @@ import Html.Attributes
 a = Html.Attributes.contenteditable True
 """
                     |> Review.Test.run
-                        (NoProblematicAttributes.rule
-                            [ NoProblematicAttributes.forbid
+                        (NoProblematicAttributes.init
+                            |> NoProblematicAttributes.forbid
                                 { moduleName = [ "Html", "Attributes" ]
                                 , functionName = "contenteditable"
                                 , message = "Don't use contenteditable"
                                 , details = [ "It causes issues." ]
                                 }
-                            ]
+                            |> NoProblematicAttributes.rule
                         )
                     |> Review.Test.expectErrors
                         [ Review.Test.error
@@ -541,15 +541,15 @@ import Html.Attributes
 a = Html.Attributes.contenteditable True
 """
                     |> Review.Test.run
-                        (NoProblematicAttributes.rule
-                            [ NoProblematicAttributes.forbidWithFix
+                        (NoProblematicAttributes.init
+                            |> NoProblematicAttributes.forbidWithFix
                                 { moduleName = [ "Html", "Attributes" ]
                                 , functionName = "contenteditable"
                                 , message = "Don't use contenteditable"
                                 , details = [ "Use our custom version." ]
                                 , replaceWith = "CustomAttributes.contenteditable"
                                 }
-                            ]
+                            |> NoProblematicAttributes.rule
                         )
                     |> Review.Test.expectErrors
                         [ Review.Test.error
@@ -569,14 +569,14 @@ import Svg.Attributes
 a = Svg.Attributes.xlinkHref "#icon"
 """
                     |> Review.Test.run
-                        (NoProblematicAttributes.rule
-                            [ NoProblematicAttributes.forbid
+                        (NoProblematicAttributes.init
+                            |> NoProblematicAttributes.forbid
                                 { moduleName = [ "Html", "Attributes" ]
                                 , functionName = "contenteditable"
                                 , message = "Don't use contenteditable"
                                 , details = [ "It causes issues." ]
                                 }
-                            ]
+                            |> NoProblematicAttributes.rule
                         )
                     |> Review.Test.expectNoErrors
         ]
@@ -588,7 +588,9 @@ a = Svg.Attributes.xlinkHref "#icon"
 
 ariaLabelRule : Rule
 ariaLabelRule =
-    NoProblematicAttributes.rule [ NoProblematicAttributes.noAriaLabelOnNamingProhibited ]
+    NoProblematicAttributes.init
+        |> NoProblematicAttributes.noAriaLabelOnNamingProhibited
+        |> NoProblematicAttributes.rule
 
 
 ariaLabelTests : Test
