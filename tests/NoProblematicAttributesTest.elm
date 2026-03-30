@@ -27,6 +27,7 @@ all =
         , titleTests
         , htmlClassOnSvgTests
         , customOptionTests
+        , ariaLabelTests
         ]
 
 
@@ -578,4 +579,206 @@ a = Svg.Attributes.xlinkHref "#icon"
                             ]
                         )
                     |> Review.Test.expectNoErrors
+        ]
+
+
+
+-- REQUIREMENT 5: aria-label on naming-prohibited elements
+
+
+ariaLabelRule : Rule
+ariaLabelRule =
+    NoProblematicAttributes.rule [ NoProblematicAttributes.noAriaLabelOnNamingProhibited ]
+
+
+ariaLabelTests : Test
+ariaLabelTests =
+    describe "aria-label on naming-prohibited elements"
+        [ test "should report aria-label on div (implicit role=generic)" <|
+            \() ->
+                """module A exposing (..)
+import Html
+import Html.Attributes
+a = Html.div [ Html.Attributes.attribute "aria-label" "foo" ] []
+"""
+                    |> Review.Test.runWithProjectData projectWithHtmlDependency ariaLabelRule
+                    |> Review.Test.expectErrors
+                        [ Review.Test.error
+                            { message = "`aria-label` has no effect on `<div>` elements"
+                            , details =
+                                [ "The `<div>` element has an implicit ARIA role of `generic`, which prohibits naming from author. The `aria-label` attribute will be ignored by assistive technologies."
+                                , "Either use a semantic HTML element (like `<button>` or `<nav>`) or add an explicit `role` attribute."
+                                ]
+                            , under = "\"aria-label\""
+                            }
+                        ]
+        , test "should report aria-label on span (implicit role=generic)" <|
+            \() ->
+                """module A exposing (..)
+import Html
+import Html.Attributes
+a = Html.span [ Html.Attributes.attribute "aria-label" "bar" ] []
+"""
+                    |> Review.Test.runWithProjectData projectWithHtmlDependency ariaLabelRule
+                    |> Review.Test.expectErrors
+                        [ Review.Test.error
+                            { message = "`aria-label` has no effect on `<span>` elements"
+                            , details =
+                                [ "The `<span>` element has an implicit ARIA role of `generic`, which prohibits naming from author. The `aria-label` attribute will be ignored by assistive technologies."
+                                , "Either use a semantic HTML element (like `<button>` or `<nav>`) or add an explicit `role` attribute."
+                                ]
+                            , under = "\"aria-label\""
+                            }
+                        ]
+        , test "should not report aria-label on button (naming allowed)" <|
+            \() ->
+                """module A exposing (..)
+import Html
+import Html.Attributes
+a = Html.button [ Html.Attributes.attribute "aria-label" "Close" ] []
+"""
+                    |> Review.Test.runWithProjectData projectWithHtmlDependency ariaLabelRule
+                    |> Review.Test.expectNoErrors
+        , test "should not report aria-label on nav (naming allowed)" <|
+            \() ->
+                """module A exposing (..)
+import Html
+import Html.Attributes
+a = Html.nav [ Html.Attributes.attribute "aria-label" "Main" ] []
+"""
+                    |> Review.Test.runWithProjectData projectWithHtmlDependency ariaLabelRule
+                    |> Review.Test.expectNoErrors
+        , test "should not report when div has explicit role=button" <|
+            \() ->
+                """module A exposing (..)
+import Html
+import Html.Attributes
+a = Html.div [ Html.Attributes.attribute "role" "button", Html.Attributes.attribute "aria-label" "Close" ] []
+"""
+                    |> Review.Test.runWithProjectData projectWithHtmlDependency ariaLabelRule
+                    |> Review.Test.expectNoErrors
+        , test "should report when div has explicit role=generic" <|
+            \() ->
+                """module A exposing (..)
+import Html
+import Html.Attributes
+a = Html.div [ Html.Attributes.attribute "role" "generic", Html.Attributes.attribute "aria-label" "foo" ] []
+"""
+                    |> Review.Test.runWithProjectData projectWithHtmlDependency ariaLabelRule
+                    |> Review.Test.expectErrors
+                        [ Review.Test.error
+                            { message = "`aria-label` has no effect on `<div>` elements"
+                            , details =
+                                [ "The `<div>` element has an explicit ARIA role of `generic`, which prohibits naming from author. The `aria-label` attribute will be ignored by assistive technologies."
+                                , "Either use a semantic HTML element (like `<button>` or `<nav>`) or add an explicit `role` attribute."
+                                ]
+                            , under = "\"aria-label\""
+                            }
+                        ]
+        , test "should report aria-labelledby on span" <|
+            \() ->
+                """module A exposing (..)
+import Html
+import Html.Attributes
+a = Html.span [ Html.Attributes.attribute "aria-labelledby" "some-id" ] []
+"""
+                    |> Review.Test.runWithProjectData projectWithHtmlDependency ariaLabelRule
+                    |> Review.Test.expectErrors
+                        [ Review.Test.error
+                            { message = "`aria-labelledby` has no effect on `<span>` elements"
+                            , details =
+                                [ "The `<span>` element has an implicit ARIA role of `generic`, which prohibits naming from author. The `aria-labelledby` attribute will be ignored by assistive technologies."
+                                , "Either use a semantic HTML element (like `<button>` or `<nav>`) or add an explicit `role` attribute."
+                                ]
+                            , under = "\"aria-labelledby\""
+                            }
+                        ]
+        , test "should not report when no aria-label is present" <|
+            \() ->
+                """module A exposing (..)
+import Html
+import Html.Attributes
+a = Html.div [ Html.Attributes.class "foo" ] []
+"""
+                    |> Review.Test.runWithProjectData projectWithHtmlDependency ariaLabelRule
+                    |> Review.Test.expectNoErrors
+        , test "should not report when attribute list is a variable" <|
+            \() ->
+                """module A exposing (..)
+import Html
+a attrs = Html.div attrs []
+"""
+                    |> Review.Test.runWithProjectData projectWithHtmlDependency ariaLabelRule
+                    |> Review.Test.expectNoErrors
+        , test "should not report for non-Html module functions" <|
+            \() ->
+                """module A exposing (..)
+import Html.Attributes
+a = MyComponent.div [ Html.Attributes.attribute "aria-label" "x" ] []
+"""
+                    |> Review.Test.runWithProjectData projectWithHtmlDependency ariaLabelRule
+                    |> Review.Test.expectNoErrors
+        , test "should not report aria-label on a with href (role=link)" <|
+            \() ->
+                """module A exposing (..)
+import Html
+import Html.Attributes
+a = Html.a [ Html.Attributes.href "/", Html.Attributes.attribute "aria-label" "Home" ] []
+"""
+                    |> Review.Test.runWithProjectData projectWithHtmlDependency ariaLabelRule
+                    |> Review.Test.expectNoErrors
+        , test "should report aria-label on a without href (role=generic)" <|
+            \() ->
+                """module A exposing (..)
+import Html
+import Html.Attributes
+a = Html.a [ Html.Attributes.attribute "aria-label" "foo" ] []
+"""
+                    |> Review.Test.runWithProjectData projectWithHtmlDependency ariaLabelRule
+                    |> Review.Test.expectErrors
+                        [ Review.Test.error
+                            { message = "`aria-label` has no effect on `<a>` elements without `href`"
+                            , details =
+                                [ "The `<a>` element without `href` has an implicit ARIA role of `generic`, which prohibits naming from author. The `aria-label` attribute will be ignored by assistive technologies."
+                                , "Either use a semantic HTML element (like `<button>` or `<nav>`) or add an explicit `role` attribute."
+                                ]
+                            , under = "\"aria-label\""
+                            }
+                        ]
+        , test "should report aria-label on p (role=paragraph, naming prohibited)" <|
+            \() ->
+                """module A exposing (..)
+import Html
+import Html.Attributes
+a = Html.p [ Html.Attributes.attribute "aria-label" "foo" ] []
+"""
+                    |> Review.Test.runWithProjectData projectWithHtmlDependency ariaLabelRule
+                    |> Review.Test.expectErrors
+                        [ Review.Test.error
+                            { message = "`aria-label` has no effect on `<p>` elements"
+                            , details =
+                                [ "The `<p>` element has an implicit ARIA role of `paragraph`, which prohibits naming from author. The `aria-label` attribute will be ignored by assistive technologies."
+                                , "Either use a semantic HTML element (like `<button>` or `<nav>`) or add an explicit `role` attribute."
+                                ]
+                            , under = "\"aria-label\""
+                            }
+                        ]
+        , test "should work with aliased Html module" <|
+            \() ->
+                """module A exposing (..)
+import Html as H
+import Html.Attributes as HA
+a = H.div [ HA.attribute "aria-label" "foo" ] []
+"""
+                    |> Review.Test.runWithProjectData projectWithHtmlDependency ariaLabelRule
+                    |> Review.Test.expectErrors
+                        [ Review.Test.error
+                            { message = "`aria-label` has no effect on `<div>` elements"
+                            , details =
+                                [ "The `<div>` element has an implicit ARIA role of `generic`, which prohibits naming from author. The `aria-label` attribute will be ignored by assistive technologies."
+                                , "Either use a semantic HTML element (like `<button>` or `<nav>`) or add an explicit `role` attribute."
+                                ]
+                            , under = "\"aria-label\""
+                            }
+                        ]
         ]

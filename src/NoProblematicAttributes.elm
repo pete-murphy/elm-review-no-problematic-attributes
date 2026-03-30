@@ -1,17 +1,20 @@
 module NoProblematicAttributes exposing
     ( rule
-    , Option, defaults, forbid, forbidWithFix, htmlClassOnSvg
+    , Option, defaults, forbid, forbidWithFix, htmlClassOnSvg, noAriaLabelOnNamingProhibited
     )
 
 {-|
 
 @docs rule
-@docs Option, defaults, forbid, forbidWithFix, htmlClassOnSvg
+@docs Option, defaults, forbid, forbidWithFix, htmlClassOnSvg, noAriaLabelOnNamingProhibited
 
 -}
 
+import Dict exposing (Dict)
 import Elm.Syntax.Expression as Expression exposing (Expression)
 import Elm.Syntax.Node as Node exposing (Node)
+import ImplicitRole
+import NamingProhibition
 import Review.Fix as Fix
 import Review.ModuleNameLookupTable as ModuleNameLookupTable exposing (ModuleNameLookupTable)
 import Review.Rule as Rule exposing (Rule)
@@ -24,6 +27,7 @@ built-in [`defaults`](#defaults).
 type Option
     = BannedFunction BannedFunctionConfig
     | HtmlClassOnSvg
+    | NoAriaLabelOnNamingProhibited
 
 
 type alias BannedFunctionConfig =
@@ -41,6 +45,7 @@ type alias BannedFunctionConfig =
   - `Svg.Attributes.style` — incompatible with Content Security Policy
   - `Html.Attributes.title` — not accessible
   - `Html.Attributes.class` on SVG elements — causes runtime error
+  - `aria-label`/`aria-labelledby` on elements whose role prohibits naming (e.g. `<div>`, `<span>`)
 
 Each is also checked for the `*.Styled.*` (elm-css) variant.
 
@@ -120,6 +125,7 @@ defaults =
             ]
         }
     , htmlClassOnSvg
+    , noAriaLabelOnNamingProhibited
     ]
 
 
@@ -215,6 +221,21 @@ This is included in [`defaults`](#defaults).
 htmlClassOnSvg : Option
 htmlClassOnSvg =
     HtmlClassOnSvg
+
+
+{-| Ban `aria-label` and `aria-labelledby` on elements whose ARIA role
+prohibits naming from author (e.g. `<div>`, `<span>`, `<p>`).
+
+These attributes are silently ignored by assistive technologies on such
+elements, misleading developers into thinking they've provided accessible
+labeling.
+
+This is included in [`defaults`](#defaults).
+
+-}
+noAriaLabelOnNamingProhibited : Option
+noAriaLabelOnNamingProhibited =
+    NoAriaLabelOnNamingProhibited
 
 
 {-| Reports uses of problematic HTML and SVG attributes.
@@ -316,10 +337,14 @@ rule options =
 
         hasHtmlClassOnSvg : Bool
         hasHtmlClassOnSvg =
-            List.any isHtmlClassOnSvg options
+            List.any isHtmlClassOnSvgOption options
+
+        hasNoAriaLabel : Bool
+        hasNoAriaLabel =
+            List.any isNoAriaLabelOption options
     in
     Rule.newModuleRuleSchemaUsingContextCreator "NoProblematicAttributes" initialContext
-        |> Rule.withExpressionEnterVisitor (expressionVisitor bannedFunctions hasHtmlClassOnSvg)
+        |> Rule.withExpressionEnterVisitor (expressionVisitor bannedFunctions hasHtmlClassOnSvg hasNoAriaLabel)
         |> Rule.fromModuleRuleSchema
 
 
@@ -329,17 +354,27 @@ getBannedFunction option =
         BannedFunction config ->
             Just config
 
-        HtmlClassOnSvg ->
+        _ ->
             Nothing
 
 
-isHtmlClassOnSvg : Option -> Bool
-isHtmlClassOnSvg option =
+isHtmlClassOnSvgOption : Option -> Bool
+isHtmlClassOnSvgOption option =
     case option of
         HtmlClassOnSvg ->
             True
 
-        BannedFunction _ ->
+        _ ->
+            False
+
+
+isNoAriaLabelOption : Option -> Bool
+isNoAriaLabelOption option =
+    case option of
+        NoAriaLabelOnNamingProhibited ->
+            True
+
+        _ ->
             False
 
 
@@ -358,8 +393,8 @@ initialContext =
         |> Rule.withModuleNameLookupTable
 
 
-expressionVisitor : List BannedFunctionConfig -> Bool -> Node Expression -> Context -> ( List (Rule.Error {}), Context )
-expressionVisitor bannedFunctions hasHtmlClassOnSvgOption node context =
+expressionVisitor : List BannedFunctionConfig -> Bool -> Bool -> Node Expression -> Context -> ( List (Rule.Error {}), Context )
+expressionVisitor bannedFunctions hasHtmlClassOnSvgEnabled hasNoAriaLabelEnabled node context =
     case Node.value node of
         Expression.FunctionOrValue _ name ->
             ( checkBannedFunctions bannedFunctions name node context
@@ -367,18 +402,29 @@ expressionVisitor bannedFunctions hasHtmlClassOnSvgOption node context =
             )
 
         Expression.Application (fnNode :: attrListNode :: _) ->
-            if hasHtmlClassOnSvgOption then
-                case Node.value fnNode of
-                    Expression.FunctionOrValue _ _ ->
-                        ( checkSvgApplication fnNode attrListNode context
-                        , context
-                        )
+            case Node.value fnNode of
+                Expression.FunctionOrValue _ fnName ->
+                    let
+                        svgErrors : List (Rule.Error {})
+                        svgErrors =
+                            if hasHtmlClassOnSvgEnabled then
+                                checkSvgApplication fnNode attrListNode context
 
-                    _ ->
-                        ( [], context )
+                            else
+                                []
 
-            else
-                ( [], context )
+                        ariaLabelErrors : List (Rule.Error {})
+                        ariaLabelErrors =
+                            if hasNoAriaLabelEnabled then
+                                checkAriaLabelOnNamingProhibited fnNode fnName attrListNode context
+
+                            else
+                                []
+                    in
+                    ( svgErrors ++ ariaLabelErrors, context )
+
+                _ ->
+                    ( [], context )
 
         _ ->
             ( [], context )
@@ -520,6 +566,230 @@ htmlClassOnSvgError moduleName node =
         }
         (Node.range node)
         [ Fix.replaceRangeBy (Node.range node) "Svg.Attributes.class" ]
+
+
+
+-- aria-label on naming-prohibited elements
+
+
+checkAriaLabelOnNamingProhibited : Node Expression -> String -> Node Expression -> Context -> List (Rule.Error {})
+checkAriaLabelOnNamingProhibited fnNode fnName attrListNode context =
+    let
+        resolvedFnModule : Maybe (List String)
+        resolvedFnModule =
+            ModuleNameLookupTable.moduleNameFor context.moduleNameLookupTable fnNode
+    in
+    if isHtmlElementModule resolvedFnModule then
+        case Node.value attrListNode of
+            Expression.ListExpr items ->
+                let
+                    attrInfo : AttrInfo
+                    attrInfo =
+                        extractAttrInfo context items
+                in
+                case attrInfo.ariaLabelNode of
+                    Just ( ariaAttrName, ariaAttrNameNode ) ->
+                        let
+                            effectiveRole : Maybe String
+                            effectiveRole =
+                                case attrInfo.explicitRole of
+                                    Just role ->
+                                        Just role
+
+                                    Nothing ->
+                                        ImplicitRole.implicitRole fnName attrInfo.knownAttributes
+                        in
+                        case effectiveRole of
+                            Just role ->
+                                if NamingProhibition.namingProhibited role then
+                                    [ ariaLabelError fnName role (attrInfo.explicitRole /= Nothing) ariaAttrName ariaAttrNameNode ]
+
+                                else
+                                    []
+
+                            Nothing ->
+                                []
+
+                    Nothing ->
+                        []
+
+            _ ->
+                []
+
+    else
+        []
+
+
+type alias AttrInfo =
+    { ariaLabelNode : Maybe ( String, Node Expression )
+    , explicitRole : Maybe String
+    , knownAttributes : Dict String String
+    }
+
+
+emptyAttrInfo : AttrInfo
+emptyAttrInfo =
+    { ariaLabelNode = Nothing
+    , explicitRole = Nothing
+    , knownAttributes = Dict.empty
+    }
+
+
+extractAttrInfo : Context -> List (Node Expression) -> AttrInfo
+extractAttrInfo context items =
+    List.foldl (extractSingleAttr context) emptyAttrInfo items
+
+
+extractSingleAttr : Context -> Node Expression -> AttrInfo -> AttrInfo
+extractSingleAttr context node info =
+    case Node.value node of
+        -- Html.Attributes.attribute "aria-label" "value"
+        -- Html.Attributes.attribute "role" "button"
+        Expression.Application (fnNode :: firstArg :: restArgs) ->
+            case Node.value fnNode of
+                Expression.FunctionOrValue _ "attribute" ->
+                    let
+                        resolved : Maybe (List String)
+                        resolved =
+                            ModuleNameLookupTable.moduleNameFor context.moduleNameLookupTable fnNode
+                    in
+                    if isHtmlAttributeModule resolved then
+                        case Node.value firstArg of
+                            Expression.Literal attrName ->
+                                if attrName == "aria-label" || attrName == "aria-labelledby" then
+                                    { info | ariaLabelNode = Just ( attrName, firstArg ) }
+
+                                else if attrName == "role" then
+                                    case restArgs of
+                                        roleValueNode :: _ ->
+                                            case Node.value roleValueNode of
+                                                Expression.Literal roleValue ->
+                                                    { info
+                                                        | explicitRole = Just roleValue
+                                                        , knownAttributes = Dict.insert "role" roleValue info.knownAttributes
+                                                    }
+
+                                                _ ->
+                                                    info
+
+                                        _ ->
+                                            info
+
+                                else
+                                    case restArgs of
+                                        valueNode :: _ ->
+                                            case Node.value valueNode of
+                                                Expression.Literal value ->
+                                                    { info | knownAttributes = Dict.insert attrName value info.knownAttributes }
+
+                                                _ ->
+                                                    -- Attribute present but value not a literal — record presence
+                                                    { info | knownAttributes = Dict.insert attrName "" info.knownAttributes }
+
+                                        _ ->
+                                            info
+
+                            _ ->
+                                info
+
+                    else
+                        info
+
+                -- Html.Attributes.href "/path"
+                Expression.FunctionOrValue _ attrFnName ->
+                    let
+                        resolved : Maybe (List String)
+                        resolved =
+                            ModuleNameLookupTable.moduleNameFor context.moduleNameLookupTable fnNode
+                    in
+                    if isHtmlAttributeModule resolved then
+                        case restArgs of
+                            valueNode :: _ ->
+                                case Node.value valueNode of
+                                    Expression.Literal value ->
+                                        { info | knownAttributes = Dict.insert attrFnName value info.knownAttributes }
+
+                                    _ ->
+                                        { info | knownAttributes = Dict.insert attrFnName "" info.knownAttributes }
+
+                            _ ->
+                                { info | knownAttributes = Dict.insert attrFnName "" info.knownAttributes }
+
+                    else
+                        info
+
+                _ ->
+                    info
+
+        -- Partial application: Html.Attributes.href (no argument yet — still records presence)
+        Expression.FunctionOrValue _ attrFnName ->
+            let
+                resolved : Maybe (List String)
+                resolved =
+                    ModuleNameLookupTable.moduleNameFor context.moduleNameLookupTable node
+            in
+            if isHtmlAttributeModule resolved && attrFnName /= "attribute" then
+                { info | knownAttributes = Dict.insert attrFnName "" info.knownAttributes }
+
+            else
+                info
+
+        _ ->
+            info
+
+
+ariaLabelError : String -> String -> Bool -> String -> Node Expression -> Rule.Error {}
+ariaLabelError tagName role isExplicit ariaAttrName ariaAttrNameNode =
+    let
+        roleSource : String
+        roleSource =
+            if isExplicit then
+                "an explicit"
+
+            else
+                "an implicit"
+
+        tagSuffix : String
+        tagSuffix =
+            if tagName == "a" && not isExplicit then
+                " without `href`"
+
+            else
+                ""
+    in
+    Rule.error
+        { message = "`" ++ ariaAttrName ++ "` has no effect on `<" ++ tagName ++ ">` elements" ++ tagSuffix
+        , details =
+            [ "The `<" ++ tagName ++ ">` element" ++ tagSuffix ++ " has " ++ roleSource ++ " ARIA role of `" ++ role ++ "`, which prohibits naming from author. The `" ++ ariaAttrName ++ "` attribute will be ignored by assistive technologies."
+            , "Either use a semantic HTML element (like `<button>` or `<nav>`) or add an explicit `role` attribute."
+            ]
+        }
+        (Node.range ariaAttrNameNode)
+
+
+isHtmlElementModule : Maybe (List String) -> Bool
+isHtmlElementModule resolvedModule =
+    case resolvedModule of
+        Just [ "Html" ] ->
+            True
+
+        Just [ "Html", "Styled" ] ->
+            True
+
+        Just [ "Html", "Keyed" ] ->
+            True
+
+        Just [ "Html", "Lazy" ] ->
+            True
+
+        Just [ "Html", "Styled", "Keyed" ] ->
+            True
+
+        Just [ "Html", "Styled", "Lazy" ] ->
+            True
+
+        _ ->
+            False
 
 
 
